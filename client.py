@@ -214,7 +214,7 @@ class Game:
                     if dist != 0:
                         t0 = self.server_tick
                         t1 = self.server_tick + self.server_last_tick
-                        print(self.server_last_tick)
+                        #print(self.server_last_tick)
 
                         elapsed = perf_counter()
 
@@ -233,7 +233,8 @@ class Game:
         self.display.blit(self.font.render(f"Latency: {round(self.client.latency * 1000, 2)}ms", True, (0,0,0)), (5, 5+16*2))
         self.display.blit(self.font.render(f"Listener: {round(self.client.listener_time * 1000, 2)}ms", True, (0,0,0)), (5, 5+16*3))
         self.display.blit(self.font.render(f"Processer: {round(self.client.processer_time * 1000, 2)}ms", True, (0,0,0)), (5, 5+16*4))
-        self.display.blit(self.font.render(f"Interpolation: {self.interpolation}", True, (0,0,0)), (5, 5+16*5))
+        self.display.blit(self.font.render(f"Sender: {round(self.client.sender_time * 1000, 2)}ms", True, (0,0,0)), (5, 5+16*5))
+        self.display.blit(self.font.render(f"Interpolation: {self.interpolation}", True, (0,0,0)), (5, 5+16*6))
 
         pygame.display.flip()
 

@@ -7,7 +7,7 @@ from datetime import datetime
 from time import time, perf_counter, sleep
 from dataclasses import dataclass
 from enum import Enum
-from queue import Queue
+from queue import Queue, Empty
 
 
 HOSTNAME = socket.gethostname()
@@ -116,8 +116,6 @@ class TCPServer(threading.Thread):
         
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.bind((self.address, self.port))
-        # Research TCP_NODELAY
-        # self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         self.clients: list[TCPClientConnection] = list()
         self._packet_counter = 0
@@ -196,13 +194,16 @@ class TCPClientConnection:
 
         self.outgoing = Queue()
         self.incoming = Queue()
+        self.queue_timeout = 0.1
 
         self.is_running = False
 
         self.listener_thread: threading.Thread
         self.processer_thread: threading.Thread
+        self.sender_thread: threading.Thread
         self.listener_time = 0.0
         self.processer_time = 0.0
+        self.sender_time = 0.0
 
     def __repr__(self) -> str:
         return f"<{__name__}.{self.__class__.__name__}({self.id}, {self.address}:{self.port})>"
@@ -210,11 +211,14 @@ class TCPClientConnection:
     def _start(self) -> None:
         self.is_running = True
 
-        self.listener_thread = threading.Thread(target=self.listen, daemon=False)
+        self.listener_thread = threading.Thread(target=self._listen_job, daemon=False)
         self.listener_thread.start()
 
-        self.processer_thread = threading.Thread(target=self.process, daemon=False)
+        self.processer_thread = threading.Thread(target=self._process_job, daemon=False)
         self.processer_thread.start()
+
+        self.sender_thread = threading.Thread(target=self._send_job, daemon=False)
+        self.sender_thread.start()
 
     def disconnect(self) -> None:
         """ Disconnect client from server. """
@@ -233,7 +237,7 @@ class TCPClientConnection:
         packet = build_packet(PacketFormat.RAW.value, data)
         self.socket.sendall(packet)
 
-    def listen(self) -> None:
+    def _listen_job(self) -> None:
         """
         Listener thread.
         
@@ -290,41 +294,55 @@ class TCPClientConnection:
 
             self.listener_time = perf_counter() - frame_start
 
-    def process(self) -> None:
+    def _process_job(self) -> None:
         """ Packet processer thread. """
 
         while self.is_running:
             frame_start = perf_counter()
+            
+            try:
+                packet = self.incoming.get(timeout=self.queue_timeout)
+            except Empty:
+                continue
 
-            while not self.outgoing.empty():
-                data = self.outgoing.get()
-                packet = build_packet(PacketFormat.RAW.value, data)
+            if packet.header.format == PacketFormat.HEARTBEAT_PING:
+                out_packet = build_packet(PacketFormat.HEARTBEAT_PONG.value, b"")
 
                 try:
-                    self.socket.sendall(packet)
+                    self.socket.sendall(out_packet)
 
                 except (ConnectionResetError, ConnectionAbortedError):
                     self.disconnect()
                     break
 
-            # Process incoming packets
-            while not self.incoming.empty():
-                packet = self.incoming.get()
+            else:
+                self.server.event_manager.trigger("on_packet", packet, self)
 
-                if packet.header.format == PacketFormat.HEARTBEAT_PING:
-                    out_packet = build_packet(PacketFormat.HEARTBEAT_PONG.value, b"")
-
-                    try:
-                        self.socket.sendall(out_packet)
-
-                    except (ConnectionResetError, ConnectionAbortedError):
-                        self.disconnect()
-                        break
-
-                else:
-                    self.server.event_manager.trigger("on_packet", packet, self)
+            self.incoming.task_done()
 
             self.processer_time = perf_counter() - frame_start
+
+    def _send_job(self) -> None:
+        """ Packet sender thread. """
+
+        while self.is_running:
+            frame_start = perf_counter()
+
+            try:
+                data = self.outgoing.get(timeout=self.queue_timeout)
+            except Empty:
+                continue
+
+            packet = build_packet(PacketFormat.RAW.value, data)
+
+            try:
+                self.socket.sendall(packet)
+
+            except (ConnectionResetError, ConnectionAbortedError):
+                self.disconnect()
+                break
+
+            self.sender_time = perf_counter() - frame_start
 
 
 class TCPClient:
@@ -342,8 +360,6 @@ class TCPClient:
         self.port = port
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Research TCP_NODELAY
-        # self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.latency = 0.0
         self._heartbeat_last = 0.0
         self._heartbeat_sent = 0.0
@@ -353,13 +369,16 @@ class TCPClient:
 
         self.outgoing = Queue()
         self.incoming = Queue()
+        self.queue_timeout = 0.1
 
         self.is_running = False
 
         self.listener_thread: threading.Thread
         self.processer_thread: threading.Thread
+        self.sender_thread: threading.Thread
         self.listener_time = 0.0
         self.processer_time = 0.0
+        self.sender_time = 0.0
 
     def __repr__(self) -> str:
         return f"<{__name__}.{self.__class__.__name__}({self.address}:{self.port})>"
@@ -372,11 +391,14 @@ class TCPClient:
         self.socket.connect((self.address, self.port))
         self.event_manager.trigger("on_connect")
         
-        self.listener_thread = threading.Thread(target=self.listen, daemon=False)
+        self.listener_thread = threading.Thread(target=self._listen_job, daemon=False)
         self.listener_thread.start()
 
-        self.processer_thread = threading.Thread(target=self.process, daemon=False)
+        self.processer_thread = threading.Thread(target=self._process_job, daemon=False)
         self.processer_thread.start()
+
+        self.sender_thread = threading.Thread(target=self._send_job, daemon=False)
+        self.sender_thread.start()
 
     def disconnect(self) -> None:
         """ Stop the connection. """
@@ -394,7 +416,7 @@ class TCPClient:
         packet = build_packet(PacketFormat.RAW.value, data)
         self.socket.sendall(packet)
 
-    def listen(self) -> None:
+    def _listen_job(self) -> None:
         """
         Listener thread.
         
@@ -450,22 +472,33 @@ class TCPClient:
 
             self.listener_time = perf_counter() - frame_start
 
-    def process(self) -> None:
+    def _process_job(self) -> None:
         """ Packet processer thread. """
 
         while self.is_running:
             frame_start = perf_counter()
 
-            while not self.outgoing.empty():
-                data = self.outgoing.get()
-                packet = build_packet(PacketFormat.RAW.value, data)
+            try:
+                packet = self.incoming.get(timeout=self.queue_timeout)
+            except Empty:
+                continue
 
-                try:
-                    self.socket.sendall(packet)
+            if packet.header.format == PacketFormat.HEARTBEAT_PONG:
+                self._is_heartbeat_done = True
+                self.latency = packet.timestamp - self._heartbeat_sent
 
-                except (ConnectionResetError, ConnectionAbortedError):
-                    self.disconnect()
-                    break
+            else:
+                self.event_manager.trigger("on_packet", packet)
+
+            self.incoming.task_done()
+
+            self.processer_time = perf_counter() - frame_start
+
+    def _send_job(self) -> None:
+        """ Packet sender thread. """
+
+        while self.is_running:
+            frame_start = perf_counter()
 
             # Send heartbeat ping
             if self._is_heartbeat_done and time() - self._heartbeat_last >= 0.5:
@@ -481,15 +514,18 @@ class TCPClient:
                     self.disconnect()
                     break
 
-            # Process incoming packets
-            while not self.incoming.empty():
-                packet = self.incoming.get()
+            try:
+                data = self.outgoing.get(timeout=self.queue_timeout)
+            except Empty:
+                continue
 
-                if packet.header.format == PacketFormat.HEARTBEAT_PONG:
-                    self._is_heartbeat_done = True
-                    self.latency = packet.timestamp - self._heartbeat_sent
+            packet = build_packet(PacketFormat.RAW.value, data)
 
-                else:
-                    self.event_manager.trigger("on_packet", packet)
+            try:
+                self.socket.sendall(packet)
 
-            self.processer_time = perf_counter() - frame_start
+            except (ConnectionResetError, ConnectionAbortedError):
+                self.disconnect()
+                break
+
+            self.sender_time = perf_counter() - frame_start

@@ -39,10 +39,10 @@ def on_disconnect(client: net.TCPClientConnection):
 
 @server.event_manager.register
 def on_packet(packet: net.Packet, client: net.TCPClientConnection):
-    print(packet.data)
-    #data = packet.data.decode().split(",")
-    #x, y = int(data[0]), int(data[1])
-    #player_positions[client] = (x, y)
+    #print(packet.data)
+    data = packet.data.decode().split(",")
+    x, y = int(data[0]), int(data[1])
+    player_positions[client] = (x, y)
     #print("new player packet")
 
 server.start()
@@ -65,6 +65,7 @@ while not stopped:
             data = s.encode()
 
             if data:
+                #client.send_raw(data)
                 client.outgoing.put(data)
 
     # Remove disconnected clients
@@ -74,8 +75,10 @@ while not stopped:
         new_positions[client] = player_positions[client]
     player_positions = new_positions.copy()
 
-    # Log packets received per second
     if time.time() - start >= 5.0:
         start = time.time()
         print(f"{server._packet_counter} packets received ({round(server._packet_counter / 5.0, 2)} packets/s)")
         server._packet_counter = 0
+
+    #if len(server.clients) > 0:
+    #    print(f"processer: {round((server.clients[0].processer_time) * 1000.0, 2)}ms listener: {round((server.clients[0].listener_time) * 1000.0, 2)}ms")
