@@ -25,20 +25,20 @@ keyboard.add_hotkey("esc", stop)
 
 player_positions = {}
 
-@server.event_manager.register
+@server.register
 def on_ready():
     print(f"{FG.lightcyan}Server started to listen for connections at {RESET}{server.address}{FG.darkgray}:{RESET}{server.port}")
 
-@server.event_manager.register
+@server.register
 def on_connect(client: net.TCPClientConnection):
     print(f"{FG.lightgreen}New connection from {RESET}{client.address}{FG.darkgray}:{RESET}{client.port} {FG.lightgreen}is given ID {RESET}{client.id}")
 
-@server.event_manager.register
+@server.register
 def on_disconnect(client: net.TCPClientConnection):
     print(f"{FG.orange}Client#{RESET}{client.id} {FG.orange}disconnected.{RESET}")
 
-@server.event_manager.register
-def on_packet(packet: net.Packet, client: net.TCPClientConnection):
+@server.register
+def on_packet(packet: net.common.Packet, client: net.TCPClientConnection):
     #print(packet.data)
     data = packet.data.decode().split(",")
     x, y = int(data[0]), int(data[1])

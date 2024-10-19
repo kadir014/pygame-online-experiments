@@ -179,7 +179,7 @@ class Game:
             with self.profile("network"):
                 x, y = int(self.player.pos.x), int(self.player.pos.y)
                 #self.client.send_raw(f"{x},{y}".encode())
-                #self.client.outgoing.put(f"{x},{y}".encode())
+                self.client.outgoing.put(f"{x},{y}".encode())
 
             with self.profile("render"):
                 self.render()
