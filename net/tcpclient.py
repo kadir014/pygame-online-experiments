@@ -48,9 +48,9 @@ class TCPClient:
         self._event_manager = EventManager()
         self.register = self._event_manager.register
 
-        self.outgoing = Queue()
-        self.incoming = Queue()
-        self.queue_timeout = 0.1
+        self._outgoing = Queue()
+        self._incoming = Queue()
+        self._queue_timeout = 0.1
 
         self._is_running = False
 
@@ -110,11 +110,8 @@ class TCPClient:
                 break
 
             except OSError as e:
-                if not self._is_running:
-                    self.disconnect()
-                    break
-
-                else: raise e
+                self.disconnect()
+                break
                 
             if not in_packet_data:
                 self.disconnect()
@@ -143,7 +140,7 @@ class TCPClient:
                 break
 
             in_packet = Packet(in_packet_data, header, recv_time)
-            self.incoming.put(in_packet)
+            self._incoming.put(in_packet)
 
             self._listener_time = perf_counter() - frame_start
 
@@ -154,7 +151,7 @@ class TCPClient:
             frame_start = perf_counter()
 
             try:
-                packet = self.incoming.get(timeout=self.queue_timeout)
+                packet = self._incoming.get(timeout=self._queue_timeout)
             except Empty:
                 continue
 
@@ -165,7 +162,7 @@ class TCPClient:
             else:
                 self._event_manager.trigger("on_packet", packet)
 
-            self.incoming.task_done()
+            self._incoming.task_done()
 
             self._processer_time = perf_counter() - frame_start
 
@@ -190,7 +187,7 @@ class TCPClient:
                     break
 
             try:
-                data = self.outgoing.get(timeout=self.queue_timeout)
+                data = self._outgoing.get(timeout=self._queue_timeout)
             except Empty:
                 continue
 
@@ -203,12 +200,30 @@ class TCPClient:
                 self.disconnect()
                 break
 
+            except OSError as e:
+                if not self._is_running:
+                    self.disconnect()
+                    break
+
+                else: raise e
+
             self._sender_time = perf_counter() - frame_start
 
     @property
     def connection_profile(self) -> ConnectionProfile:
+        """ Connection timings. """
         return ConnectionProfile(
             self._listener_time,
             self._processer_time,
             self._sender_time
         )
+    
+    @property
+    def host(self) -> str:
+        """ Hostname or IPv4 address. """
+        return self._host
+    
+    @property
+    def port(self) -> int:
+        """ The port number. """
+        return self._port

@@ -1,5 +1,3 @@
-import signal
-
 import net
 from terminal import FG, RESET
 
